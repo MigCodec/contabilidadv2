@@ -43,7 +43,8 @@ class ReportesContablesTest extends TestCase
             ->get(route('reportes.balance-general', ['anio' => 2026]))
             ->assertOk()
             ->assertSee('Balance general 8 columnas')
-            ->assertSee('1.500,00')
+            ->assertSee('1.500')
+            ->assertDontSee('1.500,00')
             ->assertDontSee('900,00');
     }
 

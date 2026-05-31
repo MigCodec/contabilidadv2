@@ -25,13 +25,7 @@
                         <td>{{ ucfirst($asiento->estado) }}</td>
                         <td>{{ $asiento->detalles_count }}</td>
                         <td class="right">
-                            <a href="{{ route('asientos.show', $asiento) }}">Ver</a> |
-                            <a href="{{ route('asientos.edit', $asiento) }}">Editar</a>
-                            <form class="inline-form" method="POST" action="{{ route('asientos.destroy', $asiento) }}" onsubmit="return confirm('Eliminar este asiento?');">
-                                @csrf
-                                @method('DELETE')
-                                <button class="link-button danger-link" type="submit">Eliminar</button>
-                            </form>
+                            <a href="{{ route('asientos.show', $asiento) }}">Ver</a>
                         </td>
                     </tr>
                 @empty

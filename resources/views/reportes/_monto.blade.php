@@ -1,1 +1,1 @@
-{{ number_format((float) $valor, 2, ',', '.') }}
+{{ number_format((float) $valor, 0, ',', '.') }}
