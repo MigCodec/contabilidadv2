@@ -55,24 +55,57 @@ class AsientoController extends Controller
 
     public function edit(Asiento $asiento)
     {
-        abort(403, 'Los asientos registrados no se editan; registre una reversa o anulacion.');
+        $asiento->load('detalles');
+
+        return view('asientos.edit', [
+            'asiento' => $asiento,
+            'cuentas' => $this->cuentasParaFormulario($asiento),
+        ]);
     }
 
-    public function update(Request $request, Asiento $asiento)
+    public function update(Request $request, Asiento $asiento, RegistrarAsientoService $service)
     {
-        abort(403, 'Los asientos registrados no se editan; registre una reversa o anulacion.');
+        $datos = $this->validar($request);
+        $datos['user_id'] = $request->user()?->id;
+
+        $service->actualizar($asiento, $datos);
+
+        return redirect()->route('asientos.show', $asiento)->with('status', 'Asiento actualizado correctamente.');
     }
 
     public function destroy(Asiento $asiento)
     {
-        abort(403, 'Los asientos registrados no se eliminan.');
+        $asiento->delete();
+
+        return redirect()->route('asientos.index')->with('status', 'Asiento eliminado correctamente.');
     }
 
-    private function cuentasParaFormulario()
+    /**
+     * @return array<string, mixed>
+     */
+    private function validar(Request $request): array
     {
+        return $request->validate([
+            'fecha' => ['required', 'date'],
+            'glosa' => ['required', 'string', 'max:255'],
+            'detalles' => ['required', 'array', 'min:2'],
+            'detalles.*.cuenta_id' => ['required', 'integer', 'exists:cuentas,id'],
+            'detalles.*.descripcion' => ['nullable', 'string', 'max:1000'],
+            'detalles.*.debe' => ['nullable', 'numeric', 'min:0'],
+            'detalles.*.haber' => ['nullable', 'numeric', 'min:0'],
+        ]);
+    }
+
+    private function cuentasParaFormulario(?Asiento $asiento = null)
+    {
+        $cuentasDelAsiento = $asiento
+            ? $asiento->detalles()->pluck('cuenta_id')->all()
+            : [];
+
         return Cuenta::query()
             ->where('activa', true)
             ->where('acepta_movimientos', true)
+            ->orWhereIn('id', $cuentasDelAsiento)
             ->orderBy('codigo')
             ->get();
     }

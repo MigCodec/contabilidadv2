@@ -31,6 +31,7 @@
         .checkbox input { width: auto; }
         .inline-form { display: inline; }
         .link-button { background: transparent; border: 0; color: #fff; cursor: pointer; font: inherit; font-weight: 700; padding: 0; }
+        .danger-link { color: #b91c1c; }
         .pill { display: inline-block; border-radius: 999px; background: #e2e8f0; padding: 4px 8px; margin: 2px; font-size: 13px; }
         .login-box { max-width: 420px; margin: 80px auto; text-align: center; }
         .table-scroll { overflow-x: auto; }

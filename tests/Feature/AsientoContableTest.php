@@ -3,6 +3,9 @@
 namespace Tests\Feature;
 
 use App\Models\Cuenta;
+use App\Models\Permission;
+use App\Models\Role;
+use App\Models\User;
 use App\Services\RegistrarAsientoService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Validation\ValidationException;
@@ -72,6 +75,77 @@ class AsientoContableTest extends TestCase
         $this->assertCount(2, $asiento->detalles);
     }
 
+    public function test_actualiza_un_asiento_balanceado(): void
+    {
+        $caja = Cuenta::create([
+            'nombre' => 'Caja',
+            'tipo' => 'activo',
+        ]);
+
+        $ganancias = Cuenta::create([
+            'nombre' => 'Ganancias por ventas',
+            'tipo' => 'ganancia',
+        ]);
+
+        $service = app(RegistrarAsientoService::class);
+        $asiento = $service->crear([
+            'fecha' => '2026-05-31',
+            'glosa' => 'Venta contado',
+            'user_id' => null,
+            'detalles' => [
+                ['cuenta_id' => $caja->id, 'debe' => '1000.00', 'haber' => '0'],
+                ['cuenta_id' => $ganancias->id, 'debe' => '0', 'haber' => '1000.00'],
+            ],
+        ]);
+
+        $service->actualizar($asiento, [
+            'fecha' => '2026-06-01',
+            'glosa' => 'Venta contado corregida',
+            'user_id' => null,
+            'detalles' => [
+                ['cuenta_id' => $caja->id, 'debe' => '1200.00', 'haber' => '0'],
+                ['cuenta_id' => $ganancias->id, 'debe' => '0', 'haber' => '1200.00'],
+            ],
+        ]);
+
+        $asiento->refresh()->load('detalles');
+
+        $this->assertSame('Venta contado corregida', $asiento->glosa);
+        $this->assertSame('1200.00', $asiento->total_debe);
+        $this->assertSame('1200.00', $asiento->total_haber);
+    }
+
+    public function test_elimina_un_asiento_con_soft_delete_desde_el_crud(): void
+    {
+        $user = $this->usuarioConPermisoAsientos();
+        $caja = Cuenta::create([
+            'nombre' => 'Caja',
+            'tipo' => 'activo',
+        ]);
+
+        $ganancias = Cuenta::create([
+            'nombre' => 'Ganancias por ventas',
+            'tipo' => 'ganancia',
+        ]);
+
+        $asiento = app(RegistrarAsientoService::class)->crear([
+            'fecha' => '2026-05-31',
+            'glosa' => 'Venta contado',
+            'user_id' => $user->id,
+            'detalles' => [
+                ['cuenta_id' => $caja->id, 'debe' => '1000.00', 'haber' => '0'],
+                ['cuenta_id' => $ganancias->id, 'debe' => '0', 'haber' => '1000.00'],
+            ],
+        ]);
+
+        $this->actingAs($user)
+            ->delete(route('asientos.destroy', $asiento))
+            ->assertRedirect(route('asientos.index'));
+
+        $this->assertSoftDeleted('asientos', ['id' => $asiento->id]);
+        $this->assertDatabaseCount('asiento_detalles', 2);
+    }
+
     public function test_rechaza_un_asiento_descuadrado(): void
     {
         $caja = Cuenta::create([
@@ -137,5 +211,20 @@ class AsientoContableTest extends TestCase
         }
 
         $this->fail('El movimiento en cuenta inactiva debio ser rechazado.');
+    }
+
+    private function usuarioConPermisoAsientos(): User
+    {
+        $user = User::factory()->create();
+        $role = Role::create(['nombre' => 'Contador']);
+        $permission = Permission::firstOrCreate(
+            ['nombre' => 'asientos.gestionar'],
+            ['descripcion' => 'Gestionar asientos contables']
+        );
+
+        $role->permissions()->attach($permission);
+        $user->roles()->attach($role);
+
+        return $user;
     }
 }

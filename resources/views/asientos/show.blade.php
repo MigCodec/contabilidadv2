@@ -3,7 +3,15 @@
 @section('content')
     <div class="toolbar">
         <h1>Asiento #{{ $asiento->id }}</h1>
-        <a class="btn secondary" href="{{ route('asientos.index') }}">Volver</a>
+        <div>
+            <a class="btn" href="{{ route('asientos.edit', $asiento) }}">Editar</a>
+            <form class="inline-form" method="POST" action="{{ route('asientos.destroy', $asiento) }}" onsubmit="return confirm('Eliminar este asiento?');">
+                @csrf
+                @method('DELETE')
+                <button class="btn danger" type="submit">Eliminar</button>
+            </form>
+            <a class="btn secondary" href="{{ route('asientos.index') }}">Volver</a>
+        </div>
     </div>
 
     <div class="panel">

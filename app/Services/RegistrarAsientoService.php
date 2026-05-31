@@ -31,10 +31,32 @@ class RegistrarAsientoService
     }
 
     /**
+     * @param  array{fecha:string, glosa:string, user_id:int|null, detalles:array<int, array<string, mixed>>}  $datos
+     */
+    public function actualizar(Asiento $asiento, array $datos): Asiento
+    {
+        $cuentasActuales = $asiento->detalles()->pluck('cuenta_id')->all();
+        $detalles = $this->validarDetalles($datos['detalles'], $cuentasActuales);
+
+        return DB::transaction(function () use ($asiento, $datos, $detalles): Asiento {
+            $asiento->update([
+                'fecha' => $datos['fecha'],
+                'glosa' => $datos['glosa'],
+                'user_id' => $datos['user_id'] ?? $asiento->user_id,
+            ]);
+
+            $asiento->detalles()->delete();
+            $asiento->detalles()->createMany($detalles);
+
+            return $asiento->load('detalles.cuenta', 'usuario');
+        });
+    }
+
+    /**
      * @param  array<int, array<string, mixed>>  $detalles
      * @return array<int, array{cuenta_id:int, descripcion:string|null, debe:string, haber:string}>
      */
-    private function validarDetalles(array $detalles): array
+    private function validarDetalles(array $detalles, array $cuentasPermitidas = []): array
     {
         if (count($detalles) < 2) {
             throw ValidationException::withMessages([
@@ -68,8 +90,11 @@ class RegistrarAsientoService
 
             $cuenta = Cuenta::query()
                 ->whereKey($cuentaId)
-                ->where('activa', true)
-                ->where('acepta_movimientos', true)
+                ->where(function ($query) use ($cuentasPermitidas): void {
+                    $query->where(function ($query): void {
+                        $query->where('activa', true)->where('acepta_movimientos', true);
+                    })->orWhereIn('id', $cuentasPermitidas);
+                })
                 ->first();
 
             if (! $cuenta) {

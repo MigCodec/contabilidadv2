@@ -15,6 +15,7 @@ class ReportesContablesService
             ->join('cuentas', 'cuentas.id', '=', 'asiento_detalles.cuenta_id')
             ->whereYear('asientos.fecha', $anio)
             ->where('asientos.estado', 'registrado')
+            ->whereNull('asientos.deleted_at')
             ->orderBy('cuentas.codigo')
             ->orderBy('asientos.fecha')
             ->orderBy('asientos.id')
@@ -110,7 +111,8 @@ class ReportesContablesService
             ->leftJoin('asientos', function ($join) use ($anio): void {
                 $join->on('asientos.id', '=', 'asiento_detalles.asiento_id')
                     ->whereYear('asientos.fecha', $anio)
-                    ->where('asientos.estado', 'registrado');
+                    ->where('asientos.estado', 'registrado')
+                    ->whereNull('asientos.deleted_at');
             })
             ->groupBy('cuentas.id', 'cuentas.codigo', 'cuentas.nombre', 'cuentas.tipo', 'cuentas.subtipo_codigo')
             ->orderBy('cuentas.codigo')
