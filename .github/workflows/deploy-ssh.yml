@@ -1,0 +1,156 @@
+name: Deploy via SSH
+
+on:
+  push:
+    branches: ["main"]
+  workflow_dispatch:
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy Laravel app remotely
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          passphrase: ${{ secrets.SSH_PASSPHRASE }}
+          port: ${{ secrets.SSH_PORT }}
+          script: |
+            set -Eeuo pipefail
+            set -x
+
+            APP_REPO="${{ secrets.APP_REPO }}"
+            GIT_PAT="${{ secrets.GH_PAT }}"
+            REPOPATH="${{ secrets.REPO_PATH }}"
+            DEPLOYPATH="${{ secrets.DEPLOY_PATH }}"
+            BRANCH="${{ secrets.DEPLOY_BRANCH }}"
+
+            if [ -z "$APP_REPO" ]; then
+              APP_REPO="${{ github.repository }}"
+            fi
+
+            if [ -z "$REPOPATH" ]; then
+              REPOPATH="$HOME/git/contabilidad"
+            fi
+
+            if [ -z "$DEPLOYPATH" ]; then
+              DEPLOYPATH="$HOME/contabilidad"
+            fi
+
+            if [ -z "$BRANCH" ]; then
+              BRANCH="main"
+            fi
+
+            if [ -n "$GIT_PAT" ]; then
+              GIT_URL="https://x-access-token:$GIT_PAT@github.com/$APP_REPO.git"
+            else
+              GIT_URL="git@github.com:$APP_REPO.git"
+            fi
+
+            if [ -d "$REPOPATH/.git" ]; then
+              git -C "$REPOPATH" remote set-url origin "$GIT_URL" || true
+              git -C "$REPOPATH" fetch --all --prune
+              git -C "$REPOPATH" reset --hard "origin/$BRANCH"
+            else
+              mkdir -p "$(dirname "$REPOPATH")"
+              git clone "$GIT_URL" "$REPOPATH"
+              git -C "$REPOPATH" checkout "$BRANCH"
+            fi
+
+            mkdir -p "$DEPLOYPATH"
+            git --git-dir="$REPOPATH/.git" --work-tree="$DEPLOYPATH" checkout -f "$BRANCH"
+            git --git-dir="$REPOPATH/.git" --work-tree="$DEPLOYPATH" clean -fdx \
+              -e .env \
+              -e vendor \
+              -e node_modules \
+              -e storage \
+              -e storage/* \
+              -e bootstrap/cache \
+              -e public/storage \
+              || echo "Warn: git clean returned $?"
+
+            VERSION_TAG=$(git -C "$REPOPATH" describe --tags --abbrev=0 2>/dev/null || true)
+            COMMIT_SHA=$(git -C "$REPOPATH" rev-parse --short HEAD)
+            BUILD_TIME=$(TZ=America/Santiago date '+%Y-%m-%dT%H:%M:%S %Z (%z)')
+            if [ -n "$VERSION_TAG" ]; then
+              APP_VERSION="$VERSION_TAG ($COMMIT_SHA)"
+            else
+              APP_VERSION="$COMMIT_SHA"
+            fi
+
+            if [ -f "$DEPLOYPATH/.env" ]; then
+              if grep -q '^APP_VERSION=' "$DEPLOYPATH/.env"; then
+                sed -i "s/^APP_VERSION=.*/APP_VERSION=\"$APP_VERSION\"/" "$DEPLOYPATH/.env"
+              else
+                echo "APP_VERSION=\"$APP_VERSION\"" >> "$DEPLOYPATH/.env"
+              fi
+
+              if grep -q '^DEPLOY_TIME=' "$DEPLOYPATH/.env"; then
+                sed -i "s/^DEPLOY_TIME=.*/DEPLOY_TIME=\"$BUILD_TIME\"/" "$DEPLOYPATH/.env"
+              else
+                echo "DEPLOY_TIME=\"$BUILD_TIME\"" >> "$DEPLOYPATH/.env"
+              fi
+            fi
+
+            mkdir -p "$DEPLOYPATH/public"
+            echo "$APP_VERSION @ $BUILD_TIME" > "$DEPLOYPATH/public/version.txt"
+            chmod 644 "$DEPLOYPATH/public/version.txt" || true
+
+            if [ -x /opt/cpanel/ea-php82/root/usr/bin/php ]; then
+              PHP=/opt/cpanel/ea-php82/root/usr/bin/php
+            elif [ -x /opt/cpanel/ea-php83/root/usr/bin/php ]; then
+              PHP=/opt/cpanel/ea-php83/root/usr/bin/php
+            elif [ -x /opt/cpanel/ea-php84/root/usr/bin/php ]; then
+              PHP=/opt/cpanel/ea-php84/root/usr/bin/php
+            else
+              PHP=$(command -v php)
+            fi
+
+            if [ -x /opt/cpanel/composer/bin/composer ]; then
+              COMPOSER=/opt/cpanel/composer/bin/composer
+            elif [ -x /usr/local/bin/composer ]; then
+              COMPOSER=/usr/local/bin/composer
+            elif [ -f "$DEPLOYPATH/composer.phar" ]; then
+              COMPOSER="$PHP $DEPLOYPATH/composer.phar"
+            elif [ -f "$REPOPATH/composer.phar" ]; then
+              COMPOSER="$PHP $REPOPATH/composer.phar"
+            else
+              cd "$DEPLOYPATH"
+              curl -sS https://getcomposer.org/installer | $PHP
+              COMPOSER="$PHP $DEPLOYPATH/composer.phar"
+            fi
+
+            echo "Using PHP: $PHP"
+            echo "Using Composer: $COMPOSER"
+
+            cd "$DEPLOYPATH"
+
+            [ -f .env ] || cp .env.example .env || true
+            $COMPOSER install --no-dev --prefer-dist --optimize-autoloader --no-interaction
+
+            if [ -f package.json ] && command -v npm >/dev/null 2>&1; then
+              if [ -f package-lock.json ]; then
+                npm ci
+              else
+                npm install
+              fi
+              npm run build
+            fi
+
+            "$PHP" artisan migrate --force
+            "$PHP" artisan db:seed --force
+            "$PHP" artisan optimize:clear
+            "$PHP" artisan config:cache
+            "$PHP" artisan route:cache
+            "$PHP" artisan view:cache
+            "$PHP" artisan storage:link || true
+
+            chmod -R ug+rwx storage bootstrap/cache || true
+
+            echo "Deploy completed successfully"
